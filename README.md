@@ -4,8 +4,6 @@
 
 ChimpXplore is a powerful, enterprise-grade PowerShell script for disk space analysis and storage management. It provides functionality similar to TreeSize Free but with significant enhancements including optimized parallel processing, advanced permission handling, and professional interactive reporting.
 
-**Version**: 24.11.01 | **Author**: MSP Automation Team | **Updated**: November 2024
-
 ## Key Features
 
 - ✅ **Pixel-Perfect Accuracy** - Size reporting matches Windows Explorer and TreeSize Free exactly
@@ -393,10 +391,6 @@ $index | Export-Csv "C:\Reports\Index.csv" -NoTypeInformation
 - ✅ Advanced methods for permission handling
 - ✅ Comprehensive metadata collection
 - ✅ Cross-platform PowerShell Core support
-
-### Previous Versions
-- **v24.10.15**: Added WMI/Robocopy/Win32 API fallback methods
-- **v24.09.20**: Initial release with basic parallel scanning
 
 ### Support Resources
 - **Documentation**: This README and Quick Reference guide
