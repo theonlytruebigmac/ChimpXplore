@@ -77,6 +77,8 @@
 .PARAMETER FastMode
     Use optimized .NET methods for faster scanning with reduced error reporting.
     Recommended for large directories where speed is prioritized over detailed error handling.
+    Note: For system directories, combine with -IncludeHidden for better accuracy.
+    Best suited for user data, media libraries, and non-system directories.
     
 .PARAMETER FileTypes
     Filter scan to include only specific file extensions.
@@ -310,6 +312,9 @@ $Script:AllFiles = [System.Collections.Generic.List[PSObject]]::new()
 $Script:SyncLock = [System.Object]::new()
 $Script:Win32ApiLoaded = $false
 
+# Platform detection (compatible with PowerShell 5.1 and Core)
+$Script:IsWindowsPlatform = if ($PSVersionTable.PSVersion.Major -le 5) { $true } else { $IsWindows }
+
 # Enable parallel processing by default for better performance
 $UseParallel = $true
 
@@ -444,7 +449,21 @@ function Get-DirectorySize {
         try {
             # Use faster enumeration method for performance
             $items = if ($FastMode) {
-                [System.IO.Directory]::EnumerateFileSystemEntries($FolderPath)
+                # In FastMode, we need to handle hidden files manually since .NET enumeration doesn't use Force parameter
+                if ($IncludeHidden) {
+                    [System.IO.Directory]::EnumerateFileSystemEntries($FolderPath, "*", [System.IO.SearchOption]::TopDirectoryOnly)
+                } else {
+                    # Filter out hidden/system files in FastMode when IncludeHidden is false
+                    [System.IO.Directory]::EnumerateFileSystemEntries($FolderPath, "*", [System.IO.SearchOption]::TopDirectoryOnly) | Where-Object {
+                        try {
+                            $attr = [System.IO.File]::GetAttributes($_)
+                            -not ($attr -band [System.IO.FileAttributes]::Hidden) -and -not ($attr -band [System.IO.FileAttributes]::System)
+                        }
+                        catch {
+                            $true  # Include files we can't check attributes for
+                        }
+                    }
+                }
             } else {
                 Get-ChildItem -Path $FolderPath -Force:$IncludeHidden -ErrorAction Stop
             }
@@ -728,6 +747,28 @@ function Get-DirectorySize {
                 $IncludeHidden = $using:IncludeHidden
                 $FileTypes = $using:FileTypes
                 $ExcludeTypes = $using:ExcludeTypes
+                $Comprehensive = $using:Comprehensive
+                
+                # Helper function to format file sizes in parallel context
+                function Format-FileSizeParallel {
+                    param([long]$Size)
+                    
+                    if ($Size -ge 1TB) {
+                        return "{0:N2} TB" -f ($Size / 1TB)
+                    }
+                    elseif ($Size -ge 1GB) {
+                        return "{0:N2} GB" -f ($Size / 1GB)
+                    }
+                    elseif ($Size -ge 1MB) {
+                        return "{0:N2} MB" -f ($Size / 1MB)
+                    }
+                    elseif ($Size -ge 1KB) {
+                        return "{0:N2} KB" -f ($Size / 1KB)
+                    }
+                    else {
+                        return "{0} bytes" -f $Size
+                    }
+                }
                 
                 # Create a robust directory scan function for parallel execution
                 function Get-DirectorySizeSimple {
@@ -740,39 +781,150 @@ function Get-DirectorySize {
                         FolderCount = 0
                         LastModified = [DateTime]::MinValue
                         Error = $null
+                        LargeFiles = @()
                     }
                     
+                    $minSizeBytes = $MinSizeMB * 1MB
+                    
                     try {
-                        # Try PowerShell method first (more reliable for permissions)
-                        $items = Get-ChildItem -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
-                        
-                        foreach ($item in $items) {
-                            try {
-                                if ($item.PSIsContainer) {
-                                    $result.FolderCount++
-                                } else {
-                                    # Filter by file type if needed
-                                    $ext = $item.Extension.ToLower()
-                                    $includeFile = $true
-                                    
-                                    if ($ExcludeTypes.Count -gt 0 -and $ExcludeTypes -contains $ext) {
-                                        $includeFile = $false
+                        # Respect FastMode setting in parallel execution
+                        if ($FastMode) {
+                            # Use .NET methods for faster enumeration
+                            $allItems = if ($IncludeHidden) {
+                                [System.IO.Directory]::GetFileSystemEntries($Path, "*", [System.IO.SearchOption]::AllDirectories)
+                            } else {
+                                # Filter out hidden/system files when IncludeHidden is false
+                                [System.IO.Directory]::GetFileSystemEntries($Path, "*", [System.IO.SearchOption]::AllDirectories) | Where-Object {
+                                    try {
+                                        $attr = [System.IO.File]::GetAttributes($_)
+                                        -not ($attr -band [System.IO.FileAttributes]::Hidden) -and -not ($attr -band [System.IO.FileAttributes]::System)
                                     }
-                                    if ($FileTypes.Count -gt 0 -and $FileTypes -notcontains $ext) {
-                                        $includeFile = $false
-                                    }
-                                    
-                                    if ($includeFile) {
-                                        $result.FileCount++
-                                        $result.Size += $item.Length
-                                        if ($item.LastWriteTime -gt $result.LastModified) {
-                                            $result.LastModified = $item.LastWriteTime
-                                        }
+                                    catch {
+                                        $true  # Include files we can't check attributes for
                                     }
                                 }
                             }
-                            catch {
-                                # Skip items we can't access
+                            
+                            foreach ($item in $allItems) {
+                                try {
+                                    $info = [System.IO.FileInfo]::new($item)
+                                    if ($info.Attributes -band [System.IO.FileAttributes]::Directory) {
+                                        $result.FolderCount++
+                                    } else {
+                                        # Filter by file type if needed
+                                        $ext = $info.Extension.ToLower()
+                                        $includeFile = $true
+                                        
+                                        if ($ExcludeTypes.Count -gt 0 -and $ExcludeTypes -contains $ext) {
+                                            $includeFile = $false
+                                        }
+                                        if ($FileTypes.Count -gt 0 -and $FileTypes -notcontains $ext) {
+                                            $includeFile = $false
+                                        }
+                                        
+                                        if ($includeFile) {
+                                            $result.FileCount++
+                                            $result.Size += $info.Length
+                                            if ($info.LastWriteTime -gt $result.LastModified) {
+                                                $result.LastModified = $info.LastWriteTime
+                                            }
+                                            
+                                            # Collect large files
+                                            if ($info.Length -ge $minSizeBytes) {
+                                                $fileObj = [PSCustomObject]@{
+                                                    Name = $info.Name
+                                                    Path = $info.FullName
+                                                    Size = $info.Length
+                                                    SizeFormatted = Format-FileSizeParallel $info.Length
+                                                    LastModified = $info.LastWriteTime
+                                                    Extension = $info.Extension
+                                                }
+                                                
+                                                # Add comprehensive details if enabled
+                                                if ($Comprehensive) {
+                                                    try {
+                                                        $fileObj | Add-Member -NotePropertyName "CreationTime" -NotePropertyValue $info.CreationTime
+                                                        $fileObj | Add-Member -NotePropertyName "LastAccessTime" -NotePropertyValue $info.LastAccessTime
+                                                        $fileObj | Add-Member -NotePropertyName "Attributes" -NotePropertyValue $info.Attributes.ToString()
+                                                        $fileObj | Add-Member -NotePropertyName "IsReadOnly" -NotePropertyValue (($info.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0)
+                                                        $fileObj | Add-Member -NotePropertyName "IsHidden" -NotePropertyValue (($info.Attributes -band [System.IO.FileAttributes]::Hidden) -ne 0)
+                                                        $fileObj | Add-Member -NotePropertyName "IsSystem" -NotePropertyValue (($info.Attributes -band [System.IO.FileAttributes]::System) -ne 0)
+                                                    }
+                                                    catch {
+                                                        # If we can't get comprehensive details, continue without them
+                                                    }
+                                                }
+                                                
+                                                $result.LargeFiles += $fileObj
+                                            }
+                                        }
+                                    }
+                                }
+                                catch {
+                                    # Skip items we can't access
+                                }
+                            }
+                        } else {
+                            # Use PowerShell method (more reliable for permissions but slower)
+                            $items = Get-ChildItem -Path $Path -Recurse -Force:$IncludeHidden -ErrorAction SilentlyContinue
+                            
+                            foreach ($item in $items) {
+                                try {
+                                    if ($item.PSIsContainer) {
+                                        $result.FolderCount++
+                                    } else {
+                                        # Filter by file type if needed
+                                        $ext = $item.Extension.ToLower()
+                                        $includeFile = $true
+                                        
+                                        if ($ExcludeTypes.Count -gt 0 -and $ExcludeTypes -contains $ext) {
+                                            $includeFile = $false
+                                        }
+                                        if ($FileTypes.Count -gt 0 -and $FileTypes -notcontains $ext) {
+                                            $includeFile = $false
+                                        }
+                                        
+                                        if ($includeFile) {
+                                            $result.FileCount++
+                                            $result.Size += $item.Length
+                                            if ($item.LastWriteTime -gt $result.LastModified) {
+                                                $result.LastModified = $item.LastWriteTime
+                                            }
+                                            
+                                            # Collect large files
+                                            if ($item.Length -ge $minSizeBytes) {
+                                                $fileObj = [PSCustomObject]@{
+                                                    Name = $item.Name
+                                                    Path = $item.FullName
+                                                    Size = $item.Length
+                                                    SizeFormatted = Format-FileSizeParallel $item.Length
+                                                    LastModified = $item.LastWriteTime
+                                                    Extension = $item.Extension
+                                                }
+                                                
+                                                # Add comprehensive details if enabled
+                                                if ($Comprehensive) {
+                                                    try {
+                                                        $fileObj | Add-Member -NotePropertyName "CreationTime" -NotePropertyValue $item.CreationTime
+                                                        $fileObj | Add-Member -NotePropertyName "LastAccessTime" -NotePropertyValue $item.LastAccessTime
+                                                        $fileObj | Add-Member -NotePropertyName "Attributes" -NotePropertyValue $item.Attributes.ToString()
+                                                        $fileObj | Add-Member -NotePropertyName "IsReadOnly" -NotePropertyValue (($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0)
+                                                        $fileObj | Add-Member -NotePropertyName "IsHidden" -NotePropertyValue (($item.Attributes -band [System.IO.FileAttributes]::Hidden) -ne 0)
+                                                        $fileObj | Add-Member -NotePropertyName "IsSystem" -NotePropertyValue (($item.Attributes -band [System.IO.FileAttributes]::System) -ne 0)
+                                                    }
+                                                    catch {
+                                                        # If we can't get comprehensive details, continue without them
+                                                    }
+                                                }
+                                                
+                                                $result.LargeFiles += $fileObj
+                                            }
+                                        }
+                                    }
+                                }
+                                catch {
+                                    # Skip items we can't access
+                                }
                             }
                         }
                     }
@@ -803,6 +955,35 @@ function Get-DirectorySize {
                                             $result.Size += $info.Length
                                             if ($info.LastWriteTime -gt $result.LastModified) {
                                                 $result.LastModified = $info.LastWriteTime
+                                            }
+                                            
+                                            # Collect large files
+                                            if ($info.Length -ge $minSizeBytes) {
+                                                $fileObj = [PSCustomObject]@{
+                                                    Name = $info.Name
+                                                    Path = $info.FullName
+                                                    Size = $info.Length
+                                                    SizeFormatted = Format-FileSizeParallel $info.Length
+                                                    LastModified = $info.LastWriteTime
+                                                    Extension = $info.Extension
+                                                }
+                                                
+                                                # Add comprehensive details if enabled
+                                                if ($Comprehensive) {
+                                                    try {
+                                                        $fileObj | Add-Member -NotePropertyName "CreationTime" -NotePropertyValue $info.CreationTime
+                                                        $fileObj | Add-Member -NotePropertyName "LastAccessTime" -NotePropertyValue $info.LastAccessTime
+                                                        $fileObj | Add-Member -NotePropertyName "Attributes" -NotePropertyValue $info.Attributes.ToString()
+                                                        $fileObj | Add-Member -NotePropertyName "IsReadOnly" -NotePropertyValue (($info.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0)
+                                                        $fileObj | Add-Member -NotePropertyName "IsHidden" -NotePropertyValue (($info.Attributes -band [System.IO.FileAttributes]::Hidden) -ne 0)
+                                                        $fileObj | Add-Member -NotePropertyName "IsSystem" -NotePropertyValue (($info.Attributes -band [System.IO.FileAttributes]::System) -ne 0)
+                                                    }
+                                                    catch {
+                                                        # If we can't get comprehensive details, continue without them
+                                                    }
+                                                }
+                                                
+                                                $result.LargeFiles += $fileObj
                                             }
                                         }
                                     }
@@ -844,6 +1025,19 @@ function Get-DirectorySize {
                             [System.Threading.Monitor]::Exit($Script:SyncLock)
                         }
                     }
+                    
+                    # Collect large files from parallel results
+                    if ($result.LargeFiles -and $result.LargeFiles.Count -gt 0) {
+                        [System.Threading.Monitor]::Enter($Script:SyncLock)
+                        try {
+                            foreach ($file in $result.LargeFiles) {
+                                $Script:AllFiles.Add($file)
+                            }
+                        }
+                        finally {
+                            [System.Threading.Monitor]::Exit($Script:SyncLock)
+                        }
+                    }
                 }
             }
         }
@@ -878,7 +1072,7 @@ function Get-DirectorySizeAdvanced {
     }
     
     # Try WMI first if enabled (fast and handles many permission issues)
-    if ($UseWMI -and $IsWindows) {
+    if ($UseWMI -and $Script:IsWindowsPlatform) {
         try {
             Write-Verbose "Advanced Methods: Trying WMI for $FolderPath"
             $wmiPath = $FolderPath -replace '\\', '\\' -replace ':', '\\:'
@@ -900,7 +1094,7 @@ function Get-DirectorySizeAdvanced {
     }
     
     # Try Robocopy if enabled (very reliable for size calculation)
-    if ($UseRobocopy -and $IsWindows) {
+    if ($UseRobocopy -and $Script:IsWindowsPlatform) {
         try {
             Write-Verbose "Advanced Methods: Trying Robocopy for $FolderPath"
             $tempFile = [System.IO.Path]::GetTempFileName()
@@ -1032,7 +1226,7 @@ function Get-FileInfoAdvanced {
     
     try {
         # Try WMI for file that can't be accessed normally
-        if ($FallbackMethod -eq "WMI" -and $IsWindows) {
+        if ($FallbackMethod -eq "WMI" -and $Script:IsWindowsPlatform) {
             $wmiPath = $FilePath -replace '\\', '\\\\' -replace ':', '\\:'
             $wmiFile = Get-CimInstance -ClassName CIM_DataFile -Filter "Name='$wmiPath'" -ErrorAction Stop
             if ($wmiFile) {

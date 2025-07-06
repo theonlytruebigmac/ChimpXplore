@@ -1,5 +1,13 @@
 # ChimpXplore - Advanced PowerShell Disk Space Analyzer
 
+## Recent Updates (Version 24.11.01)
+
+🚀 **Major Improvements:**
+- ✅ **Fixed Large File Collection Issue**: Now properly aggregates large files from all parallel threads - no more missing files in "TOP LARGEST FILES" section
+- ✅ **Enhanced FastMode**: Improved hidden file handling in both main thread and parallel execution for better accuracy 
+- ✅ **Platform Detection**: Better compatibility across PowerShell 5.1, PowerShell Core, Windows, Linux, and macOS
+- ✅ **Parallel Processing**: Each thread now correctly collects individual file data while maintaining performance benefits
+
 ## Overview
 
 ChimpXplore is a powerful, enterprise-grade PowerShell script for disk space analysis and storage management. It provides functionality similar to TreeSize Free but with significant enhancements including optimized parallel processing, advanced permission handling, and professional interactive reporting.
@@ -49,8 +57,8 @@ ChimpXplore is a powerful, enterprise-grade PowerShell script for disk space ana
 # Generate professional HTML report with interactive charts
 .\ChimpXplore.ps1 -Path "C:\Users" -ExportHtml "UserReport.html"
 
-# Fast mode for large directories
-.\ChimpXplore.ps1 -Path "D:\Data" -FastMode -MinSize 10
+# Fast mode for large directories (with improved hidden file handling)
+.\ChimpXplore.ps1 -Path "D:\Data" -FastMode -IncludeHidden -MinSize 10
 ```
 
 ### Installation and Setup
@@ -80,7 +88,7 @@ ChimpXplore is a powerful, enterprise-grade PowerShell script for disk space ana
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `-MaxThreads` | Integer | 4 | Maximum threads for parallel processing (always enabled) |
-| `-FastMode` | Switch | False | Use optimized .NET methods for speed |
+| `-FastMode` | Switch | False | Use optimized .NET methods for speed. For system directories, combine with -IncludeHidden for better accuracy |
 | `-ProgressUpdateInterval` | Integer | 500 | Items processed before progress update |
 
 ### Advanced Parameters
@@ -133,25 +141,26 @@ ChimpXplore is a powerful, enterprise-grade PowerShell script for disk space ana
 
 ```powershell
 # Analyze large video files with maximum performance
-.\ChimpXplore.ps1 -Path "F:\MediaLibrary" -FileTypes @(".mp4",".mkv",".avi",".mov") -MinSize 100 -ExportCsv "MediaFiles.csv" -MaxThreads 12 -FastMode
+.\ChimpXplore.ps1 -Path "F:\MediaLibrary" -FileTypes @(".mp4",".mkv",".avi",".mov") -MinSize 100 -ExportCsv "MediaFiles.csv" -MaxThreads 12 -FastMode -IncludeHidden
 ```
 
 **Features**:
 - Targets only video files (4 common formats)
 - Minimum 100MB size filter
 - 12-thread parallel processing for maximum speed
-- Fast mode with .NET optimization
+- Fast mode with .NET optimization and proper hidden file handling
 - CSV export for spreadsheet analysis
 
 ### 4. System Directory with Advanced Access
 
 ```powershell
-# Scan protected system directories
-.\ChimpXplore.ps1 -Path "C:\Windows" -UseAdvancedMethods -Depth 3 -TopFolders 30 -ExportHtml "SystemAnalysis.html"
+# Scan protected system directories with FastMode
+.\ChimpXplore.ps1 -Path "C:\Windows" -UseAdvancedMethods -FastMode -IncludeHidden -Depth 3 -TopFolders 30 -ExportHtml "SystemAnalysis.html"
 ```
 
 **Features**:
 - Uses WMI/Robocopy/Win32 API for permission issues
+- FastMode with proper hidden file handling for system directories
 - Limited to 3 directory levels for performance
 - Advanced methods handle access-denied folders
 - HTML report with system directory breakdown
@@ -385,10 +394,12 @@ $index | Export-Csv "C:\Reports\Index.csv" -NoTypeInformation
 
 ### Current Version: 24.11.01
 - ✅ Always-on parallel processing (4 threads default)
+- ✅ Enhanced FastMode with proper hidden file handling in parallel threads
+- ✅ Fixed large file collection issue - now properly aggregates files from all parallel threads
 - ✅ Interactive HTML reports with Chart.js integration
 - ✅ Intelligent unit scaling (MB/GB/TB) in charts
 - ✅ Mobile-responsive design with horizontal scrolling
-- ✅ Advanced methods for permission handling
+- ✅ Advanced methods for permission handling with improved platform detection
 - ✅ Comprehensive metadata collection
 - ✅ Cross-platform PowerShell Core support
 
