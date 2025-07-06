@@ -262,4 +262,4 @@ Get-Help .\ChimpXplore.ps1 -Parameter Path
 ```
 
 ---
-*For complete documentation, see ChimpXplore_README.md*
+*For complete documentation, see README.md*
