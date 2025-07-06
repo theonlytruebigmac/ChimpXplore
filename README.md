@@ -197,13 +197,6 @@ $date = Get-Date -Format "yyyy-MM-dd"
 - Comprehensive metadata with creation/access times
 - Large file list (100 files) for thorough review
 - Small minimum size (0.5MB) catches more cleanup targets
-```
-
-**Features**:
-- Includes hidden files and system directories
-- Comprehensive metadata with creation/access times
-- Large file list (100 files) for thorough review
-- Small minimum size (0.5MB) catches more cleanup targets
 
 ## HTML Report Features
 
