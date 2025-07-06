@@ -104,7 +104,7 @@
     
 .NOTES
     File Name      : ChimpXplore.ps1
-    Author         : MSP Automation Team
+    Author         : theonlytruebigmac
     Prerequisite   : PowerShell 5.1 or later
     Platform       : Windows, Linux, macOS (with PowerShell Core)
     
