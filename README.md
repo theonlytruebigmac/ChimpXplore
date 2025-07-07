@@ -1,6 +1,6 @@
 # ChimpXplore - Advanced PowerShell Disk Space Analyzer
 
-## Recent Updates (Version 24.11.01)
+## Recent Updates
 
 🚀 **Major Improvements:**
 - ✅ **Fixed Large File Collection Issue**: Now properly aggregates large files from all parallel threads - no more missing files in "TOP LARGEST FILES" section
